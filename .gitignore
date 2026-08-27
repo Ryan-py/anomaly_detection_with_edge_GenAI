@@ -1,0 +1,8 @@
+# PyTorch Weights & Calibration Tensors
+*.pth
+*.pt
+
+# ExecuTorch Compiled Edge Binaries
+*.pte
+
+edge_result*
