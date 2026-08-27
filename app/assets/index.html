@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edge Anomaly Detection Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              surface: "#1a1a19",
+              plane: "#0d0d0d",
+              ink: { primary: "#ffffff", secondary: "#c3c2b7", muted: "#898781" },
+              gridline: "#2c2c2a",
+              baseline: "#383835",
+              series: { 1: "#3987e5", 2: "#d95926" },
+              status: { good: "#0ca30c", warning: "#c98500", critical: "#d03b3b" },
+            },
+            fontFamily: {
+              mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+      body {
+        background-color: #0d0d0d;
+        background-image: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+        background-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px;
+        background-position: -1px -1px;
+      }
+      .panel-frame {
+        position: relative;
+      }
+      .panel-frame::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.4;
+        background: linear-gradient(#898781, #898781) top left / 14px 2px no-repeat,
+          linear-gradient(#898781, #898781) top left / 2px 14px no-repeat,
+          linear-gradient(#898781, #898781) top right / 14px 2px no-repeat,
+          linear-gradient(#898781, #898781) top right / 2px 14px no-repeat,
+          linear-gradient(#898781, #898781) bottom left / 14px 2px no-repeat,
+          linear-gradient(#898781, #898781) bottom left / 2px 14px no-repeat,
+          linear-gradient(#898781, #898781) bottom right / 14px 2px no-repeat,
+          linear-gradient(#898781, #898781) bottom right / 2px 14px no-repeat;
+      }
+      @keyframes status-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.35; }
+      }
+      #status-dot { animation: status-pulse 2s ease-in-out infinite; }
+      .jet-scale-gradient {
+        background: linear-gradient(
+          to right,
+          #000083 0%,
+          #0000ff 12.5%,
+          #00ffff 37.5%,
+          #ffff00 62.5%,
+          #ff0000 87.5%,
+          #800000 100%
+        );
+      }
+      *:focus-visible {
+        outline: 2px solid #3987e5;
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body class="font-mono bg-plane text-ink-secondary min-h-screen">
+    <div class="max-w-[1400px] mx-auto px-4 py-6 space-y-6">
+      <!-- Header -->
+      <header class="flex flex-col gap-4 border-b border-white/10 pb-5">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 class="flex items-center gap-2.5 text-xl font-semibold tracking-wide text-ink-primary uppercase">
+              <i data-lucide="scan-search" class="w-5 h-5 text-series-1"></i>
+              Edge Anomaly Detection
+            </h1>
+            <p class="text-xs text-ink-muted mt-1 tracking-wide">
+              VAE INFERENCE &middot; INT8 XNNPACK &middot; ARDUINO UNO Q &middot; LOCAL INFERENCE ONLY
+            </p>
+          </div>
+          <div id="live-clock" class="text-xs text-ink-muted tabular-nums tracking-wider"></div>
+        </div>
+        <div id="status-bar" class="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs bg-surface border border-white/10 rounded-[2px] px-4 py-2.5">
+          <span class="flex items-center gap-1.5">
+            <span id="status-dot" class="w-1.5 h-1.5 rounded-full bg-status-good"></span>
+            <span class="text-ink-secondary">SYSTEM</span>
+            <span id="status-system" class="text-ink-primary font-medium">CHECKING&hellip;</span>
+          </span>
+          <span class="w-px h-3 bg-white/10"></span>
+          <span class="flex items-center gap-1.5 text-ink-secondary">
+            <i data-lucide="cpu" class="w-3.5 h-3.5 text-ink-muted"></i> MODEL
+            <span id="status-model" class="text-ink-primary font-medium">&mdash;</span>
+          </span>
+          <span class="w-px h-3 bg-white/10"></span>
+          <span class="flex items-center gap-1.5 text-ink-secondary">
+            <i data-lucide="camera" class="w-3.5 h-3.5 text-ink-muted"></i> CAMERAS
+            <span id="status-cameras" class="text-ink-primary font-medium">&mdash;</span>
+          </span>
+          <span class="w-px h-3 bg-white/10"></span>
+          <span class="flex items-center gap-1.5 text-ink-secondary">
+            <i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-status-critical"></i> CRITICAL THRESHOLD
+            <input id="threshold-input" type="number" step="0.1" min="0.1" max="100"
+                   class="w-16 bg-plane border border-white/10 rounded-[2px] px-1.5 py-0.5 text-ink-primary text-xs tabular-nums" />
+            <span class="text-ink-secondary">%</span>
+            <button id="threshold-save-btn" class="text-[10px] uppercase tracking-wide text-series-1 hover:brightness-125 ml-0.5">Set</button>
+          </span>
+        </div>
+      </header>
+
+      <!-- Panel 1: Inspection -->
+      <section class="panel-frame bg-surface border border-white/10 rounded-[2px] p-5 md:p-6 space-y-4">
+        <div class="flex items-baseline justify-between gap-4 pb-4 border-b border-gridline">
+          <h2 class="flex items-center gap-2.5 text-sm font-semibold tracking-[0.14em] uppercase text-ink-primary">
+            <span class="text-ink-muted">01</span>
+            <i data-lucide="camera" class="w-4 h-4 text-ink-muted"></i> Inspection
+          </h2>
+          <span class="text-[10px] tracking-widest uppercase text-ink-muted">Capture &middot; Analyze &middot; Report</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label class="text-[10px] uppercase tracking-widest text-ink-muted flex items-center gap-1.5">
+              <span id="component-icon-wrap"><i data-lucide="package" class="w-3.5 h-3.5 text-ink-muted"></i></span>
+              Component
+            </label>
+            <select id="component-select" class="w-full mt-1 bg-plane border border-white/10 rounded-[2px] px-3 py-2 text-ink-primary"></select>
+          </div>
+          <div>
+            <label class="text-[10px] uppercase tracking-widest text-ink-muted">Instance</label>
+            <select id="instance-select" class="w-full mt-1 bg-plane border border-white/10 rounded-[2px] px-3 py-2 text-ink-primary"></select>
+          </div>
+          <div class="flex items-end gap-2">
+            <input id="new-instance-label" type="text" placeholder="New instance label"
+                   class="w-full bg-plane border border-white/10 rounded-[2px] px-3 py-2 text-ink-primary placeholder:text-ink-muted" />
+            <button id="create-instance-btn" class="px-3 py-2 border border-white/10 bg-white/5 hover:bg-white/10 rounded-[2px] text-xs uppercase tracking-wide whitespace-nowrap">
+              + Add
+            </button>
+          </div>
+          <div>
+            <label class="text-[10px] uppercase tracking-widest text-ink-muted">Camera Device</label>
+            <select id="camera-select" class="w-full mt-1 bg-plane border border-white/10 rounded-[2px] px-3 py-2 text-ink-primary"></select>
+          </div>
+        </div>
+
+        <div class="max-w-md">
+          <div class="relative border border-white/10 rounded-[2px] bg-plane overflow-hidden aspect-[4/3]">
+            <img id="camera-preview-img" class="w-full h-full object-cover hidden" alt="Live camera preview" />
+            <button id="camera-preview-idle" class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-ink-muted hover:text-ink-secondary">
+              <i data-lucide="camera" class="w-6 h-6"></i>
+              <span class="text-[10px] uppercase tracking-widest">Click to Start Preview</span>
+            </button>
+            <div id="camera-preview-empty" class="hidden absolute inset-0 flex-col items-center justify-center gap-2 text-ink-muted">
+              <i data-lucide="camera-off" class="w-6 h-6"></i>
+              <span class="text-[10px] uppercase tracking-widest">No Camera Detected</span>
+            </div>
+            <div id="camera-preview-live-badge" class="hidden absolute top-2 left-2 items-center gap-1.5 bg-plane/80 border border-white/10 rounded-[2px] px-2 py-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-status-critical animate-pulse"></span>
+              <span class="text-[9px] uppercase tracking-widest text-ink-primary">Live</span>
+            </div>
+          </div>
+          <p class="text-[10px] uppercase tracking-widest text-ink-muted text-center mt-1.5">Viewfinder Preview</p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <button id="capture-btn" class="px-4 py-2 bg-series-1 hover:brightness-110 rounded-[2px] text-xs font-semibold uppercase tracking-wide flex items-center gap-2 text-white">
+            <i data-lucide="camera" class="w-4 h-4"></i> Capture from Camera
+          </button>
+          <label class="px-4 py-2 border border-white/10 bg-white/5 hover:bg-white/10 rounded-[2px] text-xs font-semibold uppercase tracking-wide flex items-center gap-2 cursor-pointer">
+            <i data-lucide="upload" class="w-4 h-4"></i> Upload Image
+            <input id="upload-input" type="file" accept="image/*" class="hidden" />
+          </label>
+          <span id="analyzing-indicator" class="hidden items-center gap-2 text-xs text-ink-muted uppercase tracking-widest">
+            <span class="w-1.5 h-1.5 rounded-full bg-series-1 animate-pulse"></span> Analyzing&hellip;
+          </span>
+        </div>
+
+        <div id="inspection-error" class="hidden text-sm text-status-critical bg-status-critical/10 border border-status-critical/40 rounded-[2px] px-3 py-2 flex items-center gap-2">
+          <i data-lucide="alert-octagon" class="w-4 h-4 flex-shrink-0"></i>
+          <span id="inspection-error-text"></span>
+        </div>
+
+        <div id="inspection-result" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+          <div class="space-y-2">
+            <img id="result-raw-img" class="rounded-[2px] border border-white/10 w-full" />
+            <p class="text-[10px] uppercase tracking-widest text-ink-muted text-center">Captured Image</p>
+          </div>
+          <div class="space-y-2">
+            <img id="result-heatmap-img" class="rounded-[2px] border border-white/10 w-full" />
+            <p class="text-[10px] uppercase tracking-widest text-ink-muted text-center">Anomaly Heatmap</p>
+
+            <div class="pt-2">
+              <div class="flex items-center justify-between text-[10px] text-ink-muted tracking-wide mb-3">
+                <span>Per-Pixel Reconstruction Error</span>
+                <span>JET Colormap</span>
+              </div>
+              <div class="relative mt-4">
+                <div id="heatmap-threshold-callout" class="absolute flex flex-col items-center -top-4" style="left: 30%; transform: translateX(-50%)">
+                  <span id="heatmap-threshold-label" class="text-[9px] font-semibold text-status-critical tracking-wide leading-none mb-0.5">15%</span>
+                  <i data-lucide="chevron-down" class="w-3 h-3 text-status-critical"></i>
+                </div>
+                <div id="heatmap-threshold-tick" class="absolute top-0 w-0.5 h-3 bg-status-critical" style="left: 30%; transform: translateX(-50%)"></div>
+                <div class="jet-scale-gradient h-3 rounded-[1px] border border-white/10"></div>
+              </div>
+              <div class="flex justify-between text-[9px] text-ink-muted mt-1.5 tabular-nums">
+                <span>0%</span><span>10%</span><span>20%</span><span>30%</span><span>40%</span><span>&ge;50%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="md:col-span-2 bg-plane border border-white/10 rounded-[2px] px-4 py-3 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div class="flex flex-wrap items-center gap-4">
+                <!-- font-sans + proportional figures: the one deliberate exception to the mono UI, per dataviz hero-figure rule -->
+                <div class="flex items-baseline gap-1">
+                  <span id="result-score" class="font-sans text-6xl font-bold leading-none"></span>
+                  <span class="font-sans text-2xl font-semibold text-ink-muted">%</span>
+                </div>
+                <div id="result-badge-good" class="hidden items-center gap-1.5 text-status-good border border-status-good/40 bg-status-good/10 px-2.5 py-1 rounded-[2px] text-xs font-semibold tracking-wide uppercase">
+                  <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i> Nominal
+                </div>
+                <div id="result-badge-critical" class="hidden items-center gap-1.5 text-status-critical border border-status-critical/40 bg-status-critical/10 px-2.5 py-1 rounded-[2px] text-xs font-semibold tracking-wide uppercase">
+                  <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i> Critical Defect
+                </div>
+              </div>
+              <a id="result-pdf-link" href="#" download class="text-xs uppercase tracking-wide text-series-1 hover:brightness-125 flex items-center gap-1.5">
+                <i data-lucide="file-down" class="w-4 h-4"></i> Download PDF Report
+              </a>
+            </div>
+            <p class="text-[10px] uppercase tracking-widest text-ink-muted">Reconstruction Error &middot; Critical Threshold <span id="inspection-threshold-label">15.00%</span></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel 2: Time-Series -->
+      <section class="panel-frame bg-surface border border-white/10 rounded-[2px] p-5 md:p-6 space-y-4">
+        <div class="flex items-baseline justify-between gap-4 pb-4 border-b border-gridline">
+          <h2 class="flex items-center gap-2.5 text-sm font-semibold tracking-[0.14em] uppercase text-ink-primary">
+            <span class="text-ink-muted">02</span>
+            <i data-lucide="trending-up" class="w-4 h-4 text-ink-muted"></i> Time-Series Analysis
+          </h2>
+          <button id="timeseries-table-toggle" class="text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink-primary flex items-center gap-1.5">
+            <i data-lucide="table-2" class="w-3.5 h-3.5"></i> Table View
+          </button>
+        </div>
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <label class="text-[10px] uppercase tracking-widest text-ink-muted">Instance</label>
+            <select id="timeseries-instance-select" class="w-full md:w-64 mt-1 bg-plane border border-white/10 rounded-[2px] px-3 py-2 text-ink-primary"></select>
+          </div>
+          <button id="clear-readings-btn" class="px-3 py-2 border border-status-critical/40 bg-status-critical/10 hover:bg-status-critical/20 text-status-critical rounded-[2px] text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Clear Readings
+          </button>
+        </div>
+        <div id="timeseries-empty" class="hidden border border-dashed border-white/10 rounded-[2px] py-10 flex flex-col items-center gap-2 text-ink-muted">
+          <i data-lucide="inbox" class="w-6 h-6"></i>
+          <span class="text-xs uppercase tracking-widest">No Inspection Data Recorded</span>
+        </div>
+        <div id="timeseries-chart-wrap" class="relative h-80">
+          <canvas id="timeseries-chart"></canvas>
+        </div>
+        <div id="timeseries-table-wrap" class="hidden overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-left text-ink-muted uppercase tracking-widest text-[10px] border-b border-gridline">
+                <th class="py-2 pr-4">Timestamp</th>
+                <th class="py-2 pr-4 tabular-nums">Error %</th>
+                <th class="py-2 pr-4">Status</th>
+                <th class="py-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="timeseries-table-body" class="divide-y divide-gridline"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Panel 3: Comparison -->
+      <section class="panel-frame bg-surface border border-white/10 rounded-[2px] p-5 md:p-6 space-y-4">
+        <div class="flex items-baseline justify-between gap-4 pb-4 border-b border-gridline">
+          <h2 class="flex items-center gap-2.5 text-sm font-semibold tracking-[0.14em] uppercase text-ink-primary">
+            <span class="text-ink-muted">03</span>
+            <i data-lucide="git-compare" class="w-4 h-4 text-ink-muted"></i> Comparative Analysis
+          </h2>
+          <button id="compare-table-toggle" class="text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink-primary flex items-center gap-1.5">
+            <i data-lucide="table-2" class="w-3.5 h-3.5"></i> Table View
+          </button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          <div>
+            <label class="text-[10px] uppercase tracking-widest text-ink-muted">Instance A</label>
+            <select id="compare-a-select" class="w-full mt-1 bg-plane border border-white/10 rounded-[2px] px-3 py-2 text-ink-primary"></select>
+          </div>
+          <div>
+            <label class="text-[10px] uppercase tracking-widest text-ink-muted">Instance B</label>
+            <select id="compare-b-select" class="w-full mt-1 bg-plane border border-white/10 rounded-[2px] px-3 py-2 text-ink-primary"></select>
+          </div>
+          <button id="compare-btn" class="px-4 py-2 border border-white/10 bg-white/5 hover:bg-white/10 rounded-[2px] text-xs font-semibold uppercase tracking-wide">
+            Compare
+          </button>
+        </div>
+        <div id="compare-empty" class="hidden border border-dashed border-white/10 rounded-[2px] py-10 flex flex-col items-center gap-2 text-ink-muted">
+          <i data-lucide="inbox" class="w-6 h-6"></i>
+          <span class="text-xs uppercase tracking-widest">No Inspection Data Recorded</span>
+        </div>
+        <div id="compare-chart-wrap" class="relative h-80">
+          <canvas id="compare-chart"></canvas>
+        </div>
+        <div id="compare-table-wrap" class="hidden overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-left text-ink-muted uppercase tracking-widest text-[10px] border-b border-gridline">
+                <th class="py-2 pr-4">Timestamp</th>
+                <th class="py-2 pr-4 tabular-nums" id="compare-table-col-a">Instance A %</th>
+                <th class="py-2 tabular-nums" id="compare-table-col-b">Instance B %</th>
+              </tr>
+            </thead>
+            <tbody id="compare-table-body" class="divide-y divide-gridline"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="text-center text-[10px] uppercase tracking-widest text-ink-muted pt-2 pb-4">
+        Edge Anomaly Detection &middot; Local Inference &middot; Arduino UNO Q &middot; No Cloud Dependency
+      </footer>
+    </div>
+
+    <script>
+      let CRITICAL_THRESHOLD = 15.0;
+      const HEATMAP_SCALE_MAX = 50.0; // fixed by inference_engine.py's heatmap clip range, independent of the user-set threshold
+
+      const PALETTE = {
+        surface: "#1a1a19",
+        ink: "#ffffff",
+        inkSecondary: "#c3c2b7",
+        inkMuted: "#898781",
+        gridline: "#2c2c2a",
+        baseline: "#383835",
+        series1: "#3987e5",
+        series2: "#d95926",
+        good: "#0ca30c",
+        critical: "#d03b3b",
+      };
+
+      const COMPONENT_ICONS = {
+        cable: "cable",
+        grid: "grid",
+        metal_nut: "nut",
+        screw: "cog",
+        transistor: "circuit-board",
+      };
+
+      function scoreColor(v) {
+        return v > CRITICAL_THRESHOLD ? PALETTE.critical : PALETTE.good;
+      }
+
+      async function fetchJSON(url, opts) {
+        const res = await fetch(url, opts);
+        if (!res.ok) {
+          let detail = res.statusText;
+          try {
+            detail = (await res.json()).detail || detail;
+          } catch (e) {}
+          throw new Error(detail);
+        }
+        return res.json();
+      }
+
+      function fillSelect(sel, items, valueKey, labelFn, keyFn) {
+        sel.innerHTML = "";
+        for (const item of items) {
+          const opt = document.createElement("option");
+          opt.value = item[valueKey];
+          opt.textContent = labelFn(item);
+          if (keyFn) opt.dataset.key = keyFn(item);
+          sel.appendChild(opt);
+        }
+      }
+
+      let allInstances = [];
+
+      function tickClock() {
+        document.getElementById("live-clock").textContent = new Date().toLocaleTimeString();
+      }
+
+      function updateThresholdDisplays() {
+        const thresholdInput = document.getElementById("threshold-input");
+        if (document.activeElement !== thresholdInput) {
+          thresholdInput.value = CRITICAL_THRESHOLD.toFixed(1);
+        }
+        document.getElementById("inspection-threshold-label").textContent = `${CRITICAL_THRESHOLD.toFixed(2)}%`;
+
+        const markerPct = Math.max(0, Math.min(100, (CRITICAL_THRESHOLD / HEATMAP_SCALE_MAX) * 100));
+        document.getElementById("heatmap-threshold-callout").style.left = `${markerPct}%`;
+        document.getElementById("heatmap-threshold-tick").style.left = `${markerPct}%`;
+        document.getElementById("heatmap-threshold-label").textContent = `${CRITICAL_THRESHOLD.toFixed(0)}%`;
+      }
+
+      async function refreshStatus() {
+        const dot = document.getElementById("status-dot");
+        const systemEl = document.getElementById("status-system");
+        const modelEl = document.getElementById("status-model");
+        const camerasEl = document.getElementById("status-cameras");
+        try {
+          const s = await fetchJSON("/api/status");
+          systemEl.textContent = "ONLINE";
+          dot.className = "w-1.5 h-1.5 rounded-full bg-status-good";
+          modelEl.textContent = s.model_loaded ? "LOADED" : "MISSING";
+          modelEl.className = "font-medium " + (s.model_loaded ? "text-status-good" : "text-status-critical");
+          camerasEl.textContent = s.cameras.length ? `${s.cameras.length} FOUND` : "NONE";
+          camerasEl.className = "font-medium " + (s.cameras.length ? "text-status-good" : "text-ink-muted");
+
+          const changed = s.critical_threshold !== CRITICAL_THRESHOLD;
+          CRITICAL_THRESHOLD = s.critical_threshold;
+          updateThresholdDisplays();
+          if (changed && (window._tsChart || window._cmpChart)) {
+            await renderTimeseries();
+            await renderComparison();
+          }
+        } catch (e) {
+          systemEl.textContent = "OFFLINE";
+          dot.className = "w-1.5 h-1.5 rounded-full bg-status-critical";
+        }
+      }
+
+      function setComponentIcon(iconName) {
+        const wrap = document.getElementById("component-icon-wrap");
+        wrap.innerHTML = `<i data-lucide="${iconName}" class="w-3.5 h-3.5 text-ink-muted"></i>`;
+        lucide.createIcons();
+      }
+
+      async function refreshComponents() {
+        const components = await fetchJSON("/api/components");
+        fillSelect(
+          document.getElementById("component-select"),
+          components,
+          "id",
+          (c) => c.display_name,
+          (c) => c.key
+        );
+        const opt = document.getElementById("component-select").selectedOptions[0];
+        setComponentIcon(COMPONENT_ICONS[opt?.dataset.key] || "package");
+      }
+
+      async function refreshInstancesForComponent() {
+        const componentId = document.getElementById("component-select").value;
+        const instances = await fetchJSON(`/api/instances?component_id=${componentId}`);
+        fillSelect(document.getElementById("instance-select"), instances, "id", (i) => i.label);
+      }
+
+      async function refreshAllInstances() {
+        allInstances = await fetchJSON("/api/instances");
+        const labelFn = (i) => `${i.component_display_name} — ${i.label}`;
+        fillSelect(document.getElementById("timeseries-instance-select"), allInstances, "id", labelFn);
+        fillSelect(document.getElementById("compare-a-select"), allInstances, "id", labelFn);
+        fillSelect(document.getElementById("compare-b-select"), allInstances, "id", labelFn);
+      }
+
+      async function refreshCameras() {
+        const { devices } = await fetchJSON("/api/cameras");
+        const sel = document.getElementById("camera-select");
+        sel.innerHTML = "";
+        if (devices.length === 0) {
+          const opt = document.createElement("option");
+          opt.textContent = "No camera detected";
+          opt.value = "";
+          sel.appendChild(opt);
+        } else {
+          for (const d of devices) {
+            const opt = document.createElement("option");
+            opt.value = d;
+            opt.textContent = `Camera ${d}`;
+            sel.appendChild(opt);
+          }
+        }
+        resetCameraPreviewState();
+      }
+
+      function resetCameraPreviewState() {
+        // Shows the right placeholder without starting the stream — the camera
+        // stays off until the user explicitly asks for a preview.
+        const sel = document.getElementById("camera-select");
+        const img = document.getElementById("camera-preview-img");
+        const idle = document.getElementById("camera-preview-idle");
+        const empty = document.getElementById("camera-preview-empty");
+        const liveBadge = document.getElementById("camera-preview-live-badge");
+
+        img.removeAttribute("src");
+        img.classList.add("hidden");
+        liveBadge.classList.add("hidden");
+        liveBadge.classList.remove("flex");
+
+        const hasCamera = sel.value !== "";
+        idle.classList.toggle("hidden", !hasCamera);
+        empty.classList.toggle("hidden", hasCamera);
+        empty.classList.toggle("flex", !hasCamera);
+      }
+
+      function startCameraPreview() {
+        const sel = document.getElementById("camera-select");
+        const img = document.getElementById("camera-preview-img");
+        const idle = document.getElementById("camera-preview-idle");
+        const empty = document.getElementById("camera-preview-empty");
+        const liveBadge = document.getElementById("camera-preview-live-badge");
+        const device = sel.value;
+
+        if (device === "") {
+          resetCameraPreviewState();
+          return;
+        }
+
+        img.onerror = () => {
+          img.classList.add("hidden");
+          idle.classList.remove("hidden");
+          liveBadge.classList.add("hidden");
+          liveBadge.classList.remove("flex");
+        };
+        img.onload = () => {
+          img.classList.remove("hidden");
+          idle.classList.add("hidden");
+          empty.classList.add("hidden");
+          liveBadge.classList.remove("hidden");
+          liveBadge.classList.add("flex");
+        };
+        img.src = `/api/camera/preview?device=${device}&_=${Date.now()}`;
+      }
+
+      async function stopCameraPreview() {
+        resetCameraPreviewState();
+        try {
+          await fetchJSON("/api/camera/stop", { method: "POST" });
+        } catch (e) {
+          // best-effort — the frontend has already released the stream either way
+        }
+      }
+
+      function showInspectionResult(result) {
+        document.getElementById("inspection-error").classList.add("hidden");
+        document.getElementById("inspection-result").classList.remove("hidden");
+        document.getElementById("result-raw-img").src = result.raw_image_url;
+        document.getElementById("result-heatmap-img").src = result.heatmap_url;
+
+        const scoreEl = document.getElementById("result-score");
+        scoreEl.textContent = result.error_percentage.toFixed(2);
+        scoreEl.className = "font-sans text-6xl font-bold leading-none " + (result.is_critical ? "text-status-critical" : "text-status-good");
+
+        document.getElementById("result-badge-good").classList.toggle("hidden", result.is_critical);
+        document.getElementById("result-badge-good").classList.toggle("flex", !result.is_critical);
+        document.getElementById("result-badge-critical").classList.toggle("hidden", !result.is_critical);
+        document.getElementById("result-badge-critical").classList.toggle("flex", result.is_critical);
+
+        document.getElementById("result-pdf-link").href = `/api/reports/download/${result.id}`;
+      }
+
+      function showInspectionError(message) {
+        const box = document.getElementById("inspection-error");
+        document.getElementById("inspection-error-text").textContent = message;
+        box.classList.remove("hidden");
+        document.getElementById("inspection-result").classList.add("hidden");
+      }
+
+      function setAnalyzing(active) {
+        document.getElementById("capture-btn").disabled = active;
+        document.getElementById("upload-input").disabled = active;
+        const indicator = document.getElementById("analyzing-indicator");
+        indicator.classList.toggle("hidden", !active);
+        indicator.classList.toggle("flex", active);
+      }
+
+      function baseScales(yTitle, xTitle) {
+        return {
+          x: {
+            title: { display: true, text: xTitle, color: PALETTE.inkMuted, font: { size: 11, weight: "600" } },
+            ticks: { color: PALETTE.inkMuted, maxRotation: 45, minRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+            grid: { color: PALETTE.gridline },
+            border: { color: PALETTE.baseline },
+          },
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: yTitle, color: PALETTE.inkMuted, font: { size: 11, weight: "600" } },
+            ticks: { color: PALETTE.inkMuted, callback: (v) => `${v}%` },
+            grid: { color: PALETTE.gridline },
+            border: { color: PALETTE.baseline },
+          },
+        };
+      }
+
+      function baseLegend() {
+        return {
+          display: true,
+          position: "top",
+          align: "start",
+          labels: { color: PALETTE.inkSecondary, boxWidth: 16, boxHeight: 2, padding: 16, font: { size: 11 } },
+        };
+      }
+
+      function baseTooltip() {
+        return {
+          backgroundColor: PALETTE.surface,
+          borderColor: "rgba(255,255,255,0.10)",
+          borderWidth: 1,
+          titleColor: PALETTE.ink,
+          bodyColor: PALETTE.inkSecondary,
+          padding: 10,
+        };
+      }
+
+      function thresholdDataset(labels) {
+        return {
+          label: `Critical Threshold (${CRITICAL_THRESHOLD.toFixed(2)}%)`,
+          data: labels.map(() => CRITICAL_THRESHOLD),
+          borderColor: PALETTE.critical,
+          borderWidth: 1.5,
+          borderDash: [4, 4],
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          fill: false,
+          tension: 0,
+          order: 0,
+        };
+      }
+
+      Chart.defaults.font.family = "'JetBrains Mono', ui-monospace, SFMono-Regular, monospace";
+      Chart.defaults.font.size = 11;
+
+      async function renderTimeseries() {
+        const instanceId = document.getElementById("timeseries-instance-select").value;
+        const wrap = document.getElementById("timeseries-chart-wrap");
+        const empty = document.getElementById("timeseries-empty");
+        if (!instanceId) return;
+        const data = await fetchJSON(`/api/instances/${instanceId}/timeseries`);
+
+        if (data.series.length === 0) {
+          wrap.classList.add("hidden");
+          empty.classList.remove("hidden");
+          document.getElementById("timeseries-table-body").innerHTML = "";
+          return;
+        }
+        wrap.classList.remove("hidden");
+        empty.classList.add("hidden");
+
+        const labels = data.series.map((p) => new Date(p.timestamp).toLocaleString());
+        const ctx = document.getElementById("timeseries-chart");
+        if (window._tsChart) window._tsChart.destroy();
+        window._tsChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Reconstruction Error",
+                data: data.series.map((p) => p.error_percentage),
+                borderColor: PALETTE.series1,
+                borderWidth: 2,
+                backgroundColor: "rgba(57,135,229,0.10)",
+                fill: "origin",
+                tension: 0.2,
+                pointRadius: 5,
+                pointHoverRadius: 6,
+                pointHitRadius: 12,
+                pointBackgroundColor: data.series.map((p) => scoreColor(p.error_percentage)),
+                pointBorderColor: PALETTE.surface,
+                pointBorderWidth: 2,
+                order: 1,
+              },
+              thresholdDataset(labels),
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            scales: baseScales("Reconstruction Error (%)", "Timestamp"),
+            plugins: { legend: baseLegend(), tooltip: baseTooltip() },
+          },
+        });
+
+        const tbody = document.getElementById("timeseries-table-body");
+        tbody.innerHTML = data.series
+          .map(
+            (p) => `
+          <tr>
+            <td class="py-2 pr-4 text-ink-secondary">${new Date(p.timestamp).toLocaleString()}</td>
+            <td class="py-2 pr-4 tabular-nums text-ink-primary">${p.error_percentage.toFixed(2)}</td>
+            <td class="py-2 pr-4 ${p.is_critical ? "text-status-critical" : "text-status-good"}">${p.is_critical ? "CRITICAL" : "NOMINAL"}</td>
+            <td class="py-2 text-right">
+              <button data-delete-inspection-id="${p.id}" class="text-ink-muted hover:text-status-critical" title="Delete this reading">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </td>
+          </tr>`
+          )
+          .join("");
+        lucide.createIcons();
+      }
+
+      async function renderComparison() {
+        const a = document.getElementById("compare-a-select").value;
+        const b = document.getElementById("compare-b-select").value;
+        const wrap = document.getElementById("compare-chart-wrap");
+        const empty = document.getElementById("compare-empty");
+        if (!a || !b) return;
+        const data = await fetchJSON(`/api/compare?instance_a=${a}&instance_b=${b}`);
+        const labelFor = (side) => (side.instance ? `${side.instance.component_display_name} — ${side.instance.label}` : "Unknown");
+
+        if (data.a.series.length === 0 && data.b.series.length === 0) {
+          wrap.classList.add("hidden");
+          empty.classList.remove("hidden");
+          document.getElementById("compare-table-body").innerHTML = "";
+          return;
+        }
+        wrap.classList.remove("hidden");
+        empty.classList.add("hidden");
+
+        const labels = data.a.series.length ? data.a.series.map((p) => new Date(p.timestamp).toLocaleDateString()) : data.b.series.map((p) => new Date(p.timestamp).toLocaleDateString());
+        const ctx = document.getElementById("compare-chart");
+        if (window._cmpChart) window._cmpChart.destroy();
+        window._cmpChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: labelFor(data.a),
+                data: data.a.series.map((p) => p.error_percentage),
+                borderColor: PALETTE.series1,
+                backgroundColor: PALETTE.series1,
+                borderWidth: 2,
+                tension: 0.2,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                pointHitRadius: 12,
+                pointBackgroundColor: PALETTE.series1,
+                pointBorderColor: PALETTE.surface,
+                pointBorderWidth: 2,
+              },
+              {
+                label: labelFor(data.b),
+                data: data.b.series.map((p) => p.error_percentage),
+                borderColor: PALETTE.series2,
+                backgroundColor: PALETTE.series2,
+                borderWidth: 2,
+                tension: 0.2,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                pointHitRadius: 12,
+                pointBackgroundColor: PALETTE.series2,
+                pointBorderColor: PALETTE.surface,
+                pointBorderWidth: 2,
+              },
+              thresholdDataset(labels),
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            scales: baseScales("Reconstruction Error (%)", "Timestamp"),
+            plugins: { legend: baseLegend(), tooltip: baseTooltip() },
+          },
+        });
+
+        document.getElementById("compare-table-col-a").textContent = `${labelFor(data.a)} %`;
+        document.getElementById("compare-table-col-b").textContent = `${labelFor(data.b)} %`;
+        const maxLen = Math.max(data.a.series.length, data.b.series.length);
+        const rows = [];
+        for (let i = 0; i < maxLen; i++) {
+          const pa = data.a.series[i];
+          const pb = data.b.series[i];
+          const ts = pa?.timestamp || pb?.timestamp;
+          rows.push(`
+            <tr>
+              <td class="py-2 pr-4 text-ink-secondary">${ts ? new Date(ts).toLocaleString() : "—"}</td>
+              <td class="py-2 pr-4 tabular-nums text-ink-primary">${pa ? pa.error_percentage.toFixed(2) : "—"}</td>
+              <td class="py-2 tabular-nums text-ink-primary">${pb ? pb.error_percentage.toFixed(2) : "—"}</td>
+            </tr>`);
+        }
+        document.getElementById("compare-table-body").innerHTML = rows.join("");
+      }
+
+      function toggleTableView(tableWrapId, chartWrapId, emptyId, btnId) {
+        const tableWrap = document.getElementById(tableWrapId);
+        const chartWrap = document.getElementById(chartWrapId);
+        const empty = document.getElementById(emptyId);
+        const showingTable = !tableWrap.classList.contains("hidden");
+        tableWrap.classList.toggle("hidden", showingTable);
+        if (empty.classList.contains("hidden")) {
+          chartWrap.classList.toggle("hidden", !showingTable);
+        }
+        document.getElementById(btnId).classList.toggle("text-ink-primary", !showingTable);
+      }
+
+      document.getElementById("component-select").addEventListener("change", () => {
+        const opt = document.getElementById("component-select").selectedOptions[0];
+        setComponentIcon(COMPONENT_ICONS[opt?.dataset.key] || "package");
+        refreshInstancesForComponent();
+      });
+
+      document.getElementById("camera-select").addEventListener("change", startCameraPreview);
+      document.getElementById("camera-select").addEventListener("focus", startCameraPreview);
+      document.getElementById("camera-preview-idle").addEventListener("click", startCameraPreview);
+
+      document.getElementById("create-instance-btn").addEventListener("click", async () => {
+        const componentId = document.getElementById("component-select").value;
+        const label = document.getElementById("new-instance-label").value.trim();
+        if (!label) return;
+        await fetchJSON("/api/instances", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ component_id: Number(componentId), label }),
+        });
+        document.getElementById("new-instance-label").value = "";
+        await refreshInstancesForComponent();
+        await refreshAllInstances();
+      });
+
+      document.getElementById("capture-btn").addEventListener("click", async () => {
+        const instanceId = document.getElementById("instance-select").value;
+        const device = document.getElementById("camera-select").value;
+        if (!instanceId) return showInspectionError("Select an instance first.");
+        setAnalyzing(true);
+        try {
+          const result = await fetchJSON("/api/inspect/camera", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ instance_id: Number(instanceId), device: device ? Number(device) : 0 }),
+          });
+          showInspectionResult(result);
+          await renderTimeseries();
+        } catch (e) {
+          showInspectionError(e.message);
+        } finally {
+          setAnalyzing(false);
+          // The backend already released the camera as part of the capture call
+          // itself — this just syncs the UI back to the idle (camera-off) state.
+          resetCameraPreviewState();
+        }
+      });
+
+      document.getElementById("upload-input").addEventListener("change", async (ev) => {
+        const instanceId = document.getElementById("instance-select").value;
+        const file = ev.target.files[0];
+        if (!file) return;
+        if (!instanceId) return showInspectionError("Select an instance first.");
+        const form = new FormData();
+        form.append("instance_id", instanceId);
+        form.append("file", file);
+        setAnalyzing(true);
+        try {
+          const result = await fetchJSON("/api/inspect/upload", { method: "POST", body: form });
+          showInspectionResult(result);
+          await renderTimeseries();
+        } catch (e) {
+          showInspectionError(e.message);
+        } finally {
+          setAnalyzing(false);
+          ev.target.value = "";
+        }
+      });
+
+      document.getElementById("timeseries-instance-select").addEventListener("change", renderTimeseries);
+      document.getElementById("compare-btn").addEventListener("click", renderComparison);
+      document.getElementById("timeseries-table-toggle").addEventListener("click", () =>
+        toggleTableView("timeseries-table-wrap", "timeseries-chart-wrap", "timeseries-empty", "timeseries-table-toggle")
+      );
+      document.getElementById("compare-table-toggle").addEventListener("click", () =>
+        toggleTableView("compare-table-wrap", "compare-chart-wrap", "compare-empty", "compare-table-toggle")
+      );
+
+      document.getElementById("threshold-save-btn").addEventListener("click", async () => {
+        const input = document.getElementById("threshold-input");
+        const value = Number(input.value);
+        if (!Number.isFinite(value) || value <= 0 || value > 100) {
+          alert("Critical threshold must be a number between 0 and 100.");
+          return;
+        }
+        try {
+          const s = await fetchJSON("/api/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ critical_threshold: value }),
+          });
+          CRITICAL_THRESHOLD = s.critical_threshold;
+          updateThresholdDisplays();
+          await renderTimeseries();
+          await renderComparison();
+        } catch (e) {
+          alert(`Failed to update threshold: ${e.message}`);
+        }
+      });
+
+      document.getElementById("timeseries-table-body").addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("[data-delete-inspection-id]");
+        if (!btn) return;
+        const id = btn.dataset.deleteInspectionId;
+        if (!confirm(`Delete inspection #${id}? This cannot be undone.`)) return;
+        await fetchJSON(`/api/inspections/${id}`, { method: "DELETE" });
+        await renderTimeseries();
+      });
+
+      document.getElementById("clear-readings-btn").addEventListener("click", async () => {
+        const sel = document.getElementById("timeseries-instance-select");
+        const instanceId = sel.value;
+        if (!instanceId) return;
+        const label = sel.selectedOptions[0]?.textContent || "this instance";
+        if (!confirm(`Clear ALL readings for "${label}"? This cannot be undone.`)) return;
+        await fetchJSON(`/api/instances/${instanceId}/inspections`, { method: "DELETE" });
+        await renderTimeseries();
+      });
+
+      (async function init() {
+        lucide.createIcons();
+        tickClock();
+        setInterval(tickClock, 1000);
+        await refreshStatus();
+        await refreshComponents();
+        await refreshInstancesForComponent();
+        await refreshAllInstances();
+        await refreshCameras();
+        await renderTimeseries();
+        setInterval(refreshStatus, 10000);
+      })();
+    </script>
+  </body>
+</html>

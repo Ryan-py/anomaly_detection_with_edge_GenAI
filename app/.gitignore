@@ -1,0 +1,10 @@
+*.pth
+*.pt
+*.pte
+edge_result*
+assets/static/
+assets/models/
+python/vendor/
+.cache/
+__pycache__/
+*.pyc
