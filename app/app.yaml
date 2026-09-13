@@ -1,6 +1,6 @@
 name: Edge Anomaly Detection Dashboard
 icon: 🔩
-description: Tracks physical degradation of cables, grids, metal nuts, screws and transistors over time using a local INT8 ExecuTorch VAE anomaly detector, a web dashboard, and LED-matrix hardware alerts on critical defects.
+description: Tracks physical component wear over time using EdgeAI
 
 bricks:
   - arduino:web_ui
