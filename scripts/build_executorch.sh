@@ -23,6 +23,10 @@
 #     example-script dependency set (matplotlib, torchaudio, etc.), confirmed
 #     by torchaudio==2.11.0 matching install_requirements.py's non-minimal pin.
 #
+# Requires sudo: it installs system build dependencies (python3-venv,
+# compiler toolchain, dev headers) via apt before building — expect a sudo
+# password prompt unless it's already cached or passwordless for this user.
+#
 # Usage:
 #   scripts/build_executorch.sh [options]
 #
@@ -67,6 +71,13 @@ echo "  repo: $REPO_PATH"
 echo "  venv: $VENV_PATH"
 echo "  ref:  $REF"
 echo
+
+echo "== Installing system build dependencies (requires sudo) =="
+sudo apt-get update
+sudo apt-get install -y \
+  python3-venv \
+  python3-dev python3.13-dev build-essential \
+  libzstd-dev pkg-config
 
 if [[ ! -d "$REPO_PATH/.git" ]]; then
   echo "== Cloning executorch (with submodules) into $REPO_PATH =="

@@ -36,7 +36,11 @@ Cloning elsewhere just means passing `--venv`/`--repo` explicitly in step 2.
 
 The first command is the long one (tens of minutes to a few hours — see
 [`docs/executorch-integration.md`](docs/executorch-integration.md) for why
-this can't just be a `pip install`). It builds a venv at
+this can't just be a `pip install`) and **requires `sudo`** — it installs
+system build dependencies (`python3-venv`, `python3-dev`/`python3.13-dev`,
+`build-essential`, `libzstd-dev`, `pkg-config`) via `apt-get` before building,
+so expect a sudo password prompt unless it's already cached or passwordless
+for this user. It builds a venv at
 `/home/arduino/.venv`. The second command copies exactly what
 `app/python/inference_engine.py` needs out of that venv into
 `app/python/vendor/`, and verifies the copy works on its own before
@@ -169,8 +173,9 @@ automate this:
 - **`scripts/build_executorch.sh`** — (re)builds ExecuTorch from source into a
   fresh venv. Long-running (tens of minutes to a few hours) and heavy — only
   needed for disaster recovery on a fresh board or when deliberately moving
-  to a newer ExecuTorch version. Refuses to touch an existing venv unless you
-  pass `--force`.
+  to a newer ExecuTorch version. **Requires `sudo`** (installs system build
+  dependencies via `apt-get` first). Refuses to touch an existing venv unless
+  you pass `--force`.
 - **`scripts/vendor_executorch.py`** — copies a working build into
   `app/python/vendor/`. Run it with the *source* venv's own Python
   interpreter:
