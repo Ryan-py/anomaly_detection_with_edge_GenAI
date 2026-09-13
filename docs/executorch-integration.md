@@ -9,7 +9,7 @@ on this platform, and how to reproduce or update the solution later.
 Arduino App Lab apps run inside a Docker container that only has access to
 their own app folder — it cannot see or `pip install` the `torch`/`executorch`
 build that already exists (and was built from source) in the host venv at
-`/home/arduino/vae_model/.venv`, and the container has no compiler to rebuild
+`/home/arduino/.venv`, and the container has no compiler to rebuild
 them itself. The fix: **copy the exact already-built packages into the app
 folder** (`app/python/vendor/`, git-ignored) and **prepend that directory to
 `sys.path`** at the top of `app/python/inference_engine.py`, before importing
@@ -25,7 +25,7 @@ directly.
 (`ghcr.io/arduino/app-bricks/python-apps-base:0.12.0`) whose entrypoint
 (`/run.sh`) bind-mounts **only the app's own folder** to `/app` inside the
 container. Nothing else on the host filesystem — including
-`/home/arduino/vae_model/.venv`, where a working `torch`/`executorch` build
+`/home/arduino/.venv`, where a working `torch`/`executorch` build
 already exists — is reachable from inside that container.
 
 `run.sh` also builds a per-app virtualenv at `/app/.cache/.venv` via
@@ -41,7 +41,7 @@ the container:
 
 - **The existing build was compiled from source**, not installed from a
   standard PyPI wheel — there's a full ExecuTorch git checkout at
-  `/home/arduino/vae_model/executorch/` confirming this, and it's what
+  `/home/arduino/executorch/` confirming this, and it's what
   produced the exact working `.pte` runtime behavior the app depends on.
   A fresh `pip install` might resolve to a different build entirely (or fail
   to find a matching wheel for this board's exact aarch64/Python-3.13
@@ -190,7 +190,7 @@ venv via the process above.
 ## If this ever needs to be redone
 
 1. Confirm the working build still lives at
-   `/home/arduino/vae_model/.venv/lib/python3.13/site-packages/` (or wherever
+   `/home/arduino/.venv/lib/python3.13/site-packages/` (or wherever
    it's rebuilt to).
 2. Run the real inference path in that venv and diff `sys.modules` before/after
    (see **How the vendor list was derived**) to get an authoritative package
