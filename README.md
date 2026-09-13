@@ -30,7 +30,7 @@ Cloning elsewhere just means passing `--venv`/`--repo` explicitly in step 2.
 ### 2. Build ExecuTorch from source, then vendor it into the app
 
 ```bash
-./scripts/build_executorch.sh
+sudo ./scripts/build_executorch.sh
 /home/arduino/.venv/bin/python scripts/vendor_executorch.py
 ```
 
